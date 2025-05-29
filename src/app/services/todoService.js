@@ -472,14 +472,28 @@ export const todoService = {
     }
 
     try {
-      // 首先获取当前待办事项状态
-      const todo = await withRetry(async () => {
-        return await databases.getDocument(
+      // 首先获取当前待办事项状态，只查询需要的字段
+      const result = await withRetry(async () => {
+        return await databases.listDocuments(
           APPWRITE_CONFIG.databaseId,
           COLLECTION_ID,
-          todoId
+          [
+            Query.equal("$id", todoId),
+            Query.equal("userId", userId), // 确保只能操作自己的todo
+            Query.limit(1),
+            Query.select([
+              "$id",
+              "status"
+            ])
+          ]
         );
       }, APP_CONFIG.retry);
+
+      if (result.documents.length === 0) {
+        throw new Error("Todo not found or access denied");
+      }
+
+      const todo = result.documents[0];
 
       // 切换状态
       const newStatus = todo.status === 'completed' ? 'pending' : 'completed';

@@ -66,7 +66,18 @@ export const userService = {
         return await databases.listDocuments(
           APPWRITE_CONFIG.databaseId,
           COLLECTION_ID,
-          [Query.equal('userId', userId)]
+          [
+            Query.equal('userId', userId),
+            Query.select([
+              "$id",
+              "userId", 
+              "email",
+              "name",
+              "avatar",
+              "$createdAt",
+              "$updatedAt"
+            ])
+          ]
         );
       });
 
@@ -92,7 +103,18 @@ export const userService = {
         return await databases.listDocuments(
           APPWRITE_CONFIG.databaseId,
           COLLECTION_ID,
-          [Query.equal('email', normalizedEmail)]
+          [
+            Query.equal('email', normalizedEmail),
+            Query.select([
+              "$id",
+              "userId", 
+              "email",
+              "name",
+              "avatar",
+              "$createdAt",
+              "$updatedAt"
+            ])
+          ]
         );
       });
 
@@ -121,37 +143,14 @@ export const userService = {
           [
             Query.equal('name', normalizedName),
             Query.notEqual('userId', currentUserId), // 排除当前用户
-            Query.limit(10) // 限制结果数量，因为可能有重名
-          ]
-        );
-      });
-
-      return result.documents;
-    } catch (error) {
-      logError(error, { context: 'userService.getUserByName', name, currentUserId });
-      throw handleApiError(error, '根据用户名查询用户失败');
-    }
-  },
-
-  /**
-   * 根据用户名精准查询用户
-   */
-  async getUserByName(name, currentUserId) {
-    try {
-      if (!name) {
-        throw new Error('用户名是必需的');
-      }
-
-      const normalizedName = name.trim();
-      
-      const result = await withRetry(async () => {
-        return await databases.listDocuments(
-          APPWRITE_CONFIG.databaseId,
-          COLLECTION_ID,
-          [
-            Query.equal('name', normalizedName),
-            Query.notEqual('userId', currentUserId), // 排除当前用户
-            Query.limit(10) // 限制结果数量
+            Query.limit(10), // 限制结果数量，因为可能有重名
+            Query.select([
+              "$id",
+              "userId", 
+              "email",
+              "name",
+              "avatar"
+            ])
           ]
         );
       });
@@ -184,7 +183,14 @@ export const userService = {
               Query.search('name', term)
             ]),
             Query.notEqual('userId', currentUserId), // 排除当前用户
-            Query.limit(20) // 限制结果数量
+            Query.limit(20), // 限制结果数量
+            Query.select([
+              "$id",
+              "userId", 
+              "email",
+              "name",
+              "avatar"
+            ])
           ]
         );
       });
@@ -246,7 +252,14 @@ export const userService = {
           COLLECTION_ID,
           [
             Query.equal('userId', userIds),
-            Query.limit(100)
+            Query.limit(100),
+            Query.select([
+              "$id",
+              "userId", 
+              "email",
+              "name",
+              "avatar"
+            ])
           ]
         );
       });

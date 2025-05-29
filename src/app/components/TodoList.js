@@ -50,39 +50,35 @@ const TodoList = forwardRef(({ onCountChange, ...props }, ref) => {
     }
   }, [todos.length, onCountChange]);
 
-  // 获取过滤后的todos - 优化依赖项
+  // 获取过滤后的todos - 使用稳定的函数引用，总是获取所有数据
   const refreshWithFilters = useCallback(() => {
-    const filterParams = showAll ? {} : { status: filters.status };
-    return fetchTodos(filterParams);
-  }, [fetchTodos, filters.status, showAll]);
+    // 总是获取所有数据，在前端进行过滤
+    return fetchTodos({});
+  }, [fetchTodos]);
 
   // 暴露刷新方法给父组件
   useImperativeHandle(ref, () => ({
     refresh: refreshWithFilters
-  }));
+  }), [refreshWithFilters]);
 
-  // 初始化数据获取 - 只在组件挂载时执行一次
+  // 初始化数据获取 - 只在组件挂载时执行一次，获取所有数据
   useEffect(() => {
     if (isInitialMount.current) {
-      refreshWithFilters();
+      // 获取所有数据，不传递过滤参数
+      fetchTodos({});
       isInitialMount.current = false;
     }
-  }, []); // 移除refreshWithFilters依赖，避免重复调用
+  }, []); // 空依赖数组，只在挂载时执行
 
-  // 当过滤条件变化时重新获取数据 - 但跳过初始挂载
-  useEffect(() => {
-    if (!isInitialMount.current) {
-      refreshWithFilters();
-    }
-  }, [filters.status, showAll]); // 保持这个依赖，因为过滤条件变化时需要重新获取
+  // 移除过滤条件变化时的API调用，因为我们现在在前端过滤
+  // 过滤逻辑已经在 applyFilters 函数中处理，不需要重新调用API
 
   // 设置定期刷新 - 独立的useEffect，避免重复创建定时器
   useEffect(() => {
     // 设置定时器
     refreshIntervalRef.current = setInterval(() => {
-      // 直接调用fetchTodos，避免依赖refreshWithFilters
-      const filterParams = showAll ? {} : { status: filters.status };
-      fetchTodos(filterParams);
+      // 定期刷新时也获取所有数据
+      fetchTodos({});
     }, 5 * 60 * 1000); // 5分钟
 
     // 清理函数

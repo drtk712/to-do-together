@@ -118,7 +118,7 @@ export const notificationService = {
   },
 
   /**
-   * 获取用户的通知列表
+   * 获取通知列表
    */
   async getNotifications(userId, status = null, limit = 50) {
     try {
@@ -129,7 +129,20 @@ export const notificationService = {
       const queries = [
         Query.equal('toUserId', userId),
         Query.orderDesc('$createdAt'),
-        Query.limit(limit)
+        Query.limit(limit),
+        Query.select([
+          "$id",
+          "toUserId",
+          "fromUserId",
+          "type",
+          "title", 
+          "message",
+          "data",
+          "status",
+          "actionUrl",
+          "$createdAt",
+          "$updatedAt"
+        ])
       ];
 
       if (status) {
@@ -173,7 +186,10 @@ export const notificationService = {
           [
             Query.equal('toUserId', userId),
             Query.equal('status', NOTIFICATION_STATUS.UNREAD),
-            Query.limit(1000) // 获取所有未读通知来计数
+            Query.limit(1000), // 获取所有未读通知来计数
+            Query.select([
+              "$id"
+            ])
           ]
         );
       });
@@ -195,7 +211,7 @@ export const notificationService = {
       }
 
       // 先验证通知是否属于该用户
-      const notification = await this.getNotificationById(notificationId);
+      const notification = await this.getNotificationForValidation(notificationId);
       if (!notification || notification.toUserId !== userId) {
         throw new Error('通知不存在或无权访问');
       }
@@ -280,7 +296,7 @@ export const notificationService = {
       }
 
       // 先验证通知是否属于该用户
-      const notification = await this.getNotificationById(notificationId);
+      const notification = await this.getNotificationForValidation(notificationId);
       if (!notification || notification.toUserId !== userId) {
         throw new Error('通知不存在或无权访问');
       }
@@ -310,17 +326,39 @@ export const notificationService = {
       }
 
       const result = await withRetry(async () => {
-        return await databases.getDocument(
+        return await databases.listDocuments(
           APPWRITE_CONFIG.databaseId,
           COLLECTION_ID,
-          notificationId
+          [
+            Query.equal('$id', notificationId),
+            Query.limit(1),
+            Query.select([
+              "$id",
+              "toUserId",
+              "fromUserId",
+              "type",
+              "title", 
+              "message",
+              "data",
+              "status",
+              "actionUrl",
+              "$createdAt",
+              "$updatedAt"
+            ])
+          ]
         );
       });
 
+      if (result.documents.length === 0) {
+        return null;
+      }
+
+      const notification = result.documents[0];
+      
       // 解析data字段
       return {
-        ...result,
-        data: result.data ? JSON.parse(result.data) : {}
+        ...notification,
+        data: notification.data ? JSON.parse(notification.data) : {}
       };
     } catch (error) {
       logError(error, { context: 'notificationService.getNotificationById', notificationId });
@@ -329,7 +367,38 @@ export const notificationService = {
   },
 
   /**
-   * 清理旧通知（删除超过指定天数的已读通知）
+   * 根据ID获取通知（仅用于验证，只查询必要字段）
+   */
+  async getNotificationForValidation(notificationId) {
+    try {
+      if (!notificationId) {
+        throw new Error('通知ID是必需的');
+      }
+
+      const result = await withRetry(async () => {
+        return await databases.listDocuments(
+          APPWRITE_CONFIG.databaseId,
+          COLLECTION_ID,
+          [
+            Query.equal('$id', notificationId),
+            Query.limit(1),
+            Query.select([
+              "$id",
+              "toUserId"
+            ])
+          ]
+        );
+      });
+
+      return result.documents.length > 0 ? result.documents[0] : null;
+    } catch (error) {
+      logError(error, { context: 'notificationService.getNotificationForValidation', notificationId });
+      throw handleApiError(error, '获取通知验证信息失败');
+    }
+  },
+
+  /**
+   * 清理旧通知
    */
   async cleanupOldNotifications(userId, daysOld = 30) {
     try {
@@ -346,13 +415,16 @@ export const notificationService = {
           COLLECTION_ID,
           [
             Query.equal('toUserId', userId),
-            Query.equal('status', NOTIFICATION_STATUS.READ),
             Query.lessThan('$createdAt', cutoffDate.toISOString()),
-            Query.limit(100)
+            Query.limit(100),
+            Query.select([
+              "$id"
+            ])
           ]
         );
       });
 
+      // 删除找到的旧通知
       const deletePromises = result.documents.map(notification =>
         this.deleteNotification(notification.$id, userId)
       );
@@ -367,7 +439,7 @@ export const notificationService = {
   },
 
   /**
-   * 获取特定类型的通知
+   * 根据类型获取通知
    */
   async getNotificationsByType(userId, type, limit = 20) {
     try {
@@ -383,7 +455,20 @@ export const notificationService = {
             Query.equal('toUserId', userId),
             Query.equal('type', type),
             Query.orderDesc('$createdAt'),
-            Query.limit(limit)
+            Query.limit(limit),
+            Query.select([
+              "$id",
+              "toUserId",
+              "fromUserId",
+              "type",
+              "title", 
+              "message",
+              "data",
+              "status",
+              "actionUrl",
+              "$createdAt",
+              "$updatedAt"
+            ])
           ]
         );
       });
@@ -397,7 +482,7 @@ export const notificationService = {
       return notifications;
     } catch (error) {
       logError(error, { context: 'notificationService.getNotificationsByType', userId, type });
-      throw handleApiError(error, '获取特定类型通知失败');
+      throw handleApiError(error, '根据类型获取通知失败');
     }
   }
 }; 

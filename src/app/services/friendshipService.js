@@ -70,7 +70,7 @@ export const friendshipService = {
         throw new Error('好友关系ID和用户ID都是必需的');
       }
 
-      const friendship = await this.getFriendshipById(friendshipId);
+      const friendship = await this.getFriendshipForValidation(friendshipId);
       if (!friendship) {
         throw new Error('好友请求不存在');
       }
@@ -111,7 +111,7 @@ export const friendshipService = {
         throw new Error('好友关系ID和用户ID都是必需的');
       }
 
-      const friendship = await this.getFriendshipById(friendshipId);
+      const friendship = await this.getFriendshipForValidation(friendshipId);
       if (!friendship) {
         throw new Error('好友请求不存在');
       }
@@ -152,7 +152,7 @@ export const friendshipService = {
         throw new Error('好友关系ID和用户ID都是必需的');
       }
 
-      const friendship = await this.getFriendshipById(friendshipId);
+      const friendship = await this.getFriendshipForValidation(friendshipId);
       if (!friendship) {
         throw new Error('好友关系不存在');
       }
@@ -258,7 +258,15 @@ export const friendshipService = {
               ])
             ]),
             Query.orderDesc('$updatedAt'),
-            Query.limit(100)
+            Query.limit(100),
+            Query.select([
+              "$id",
+              "fromUserId",
+              "toUserId", 
+              "status",
+              "$createdAt",
+              "$updatedAt"
+            ])
           ]
         );
       });
@@ -287,7 +295,15 @@ export const friendshipService = {
             Query.equal('toUserId', userId),
             Query.equal('status', FRIENDSHIP_STATUS.PENDING),
             Query.orderDesc('$createdAt'),
-            Query.limit(50)
+            Query.limit(50),
+            Query.select([
+              "$id",
+              "fromUserId",
+              "toUserId", 
+              "status",
+              "$createdAt",
+              "$updatedAt"
+            ])
           ]
         );
       });
@@ -316,7 +332,15 @@ export const friendshipService = {
             Query.equal('fromUserId', userId),
             Query.equal('status', FRIENDSHIP_STATUS.PENDING),
             Query.orderDesc('$createdAt'),
-            Query.limit(50)
+            Query.limit(50),
+            Query.select([
+              "$id",
+              "fromUserId",
+              "toUserId", 
+              "status",
+              "$createdAt",
+              "$updatedAt"
+            ])
           ]
         );
       });
@@ -352,7 +376,15 @@ export const friendshipService = {
                 Query.equal('toUserId', userId1)
               ])
             ]),
-            Query.limit(1)
+            Query.limit(1),
+            Query.select([
+              "$id",
+              "fromUserId",
+              "toUserId", 
+              "status",
+              "$createdAt",
+              "$updatedAt"
+            ])
           ]
         );
       });
@@ -374,17 +406,61 @@ export const friendshipService = {
       }
 
       const result = await withRetry(async () => {
-        return await databases.getDocument(
+        return await databases.listDocuments(
           APPWRITE_CONFIG.databaseId,
           COLLECTION_ID,
-          friendshipId
+          [
+            Query.equal('$id', friendshipId),
+            Query.limit(1),
+            Query.select([
+              "$id",
+              "fromUserId",
+              "toUserId", 
+              "status",
+              "$createdAt",
+              "$updatedAt"
+            ])
+          ]
         );
       });
 
-      return result;
+      return result.documents.length > 0 ? result.documents[0] : null;
     } catch (error) {
       logError(error, { context: 'friendshipService.getFriendshipById', friendshipId });
       throw handleApiError(error, '获取好友关系详情失败');
+    }
+  },
+
+  /**
+   * 根据ID获取好友关系（仅用于验证，只查询必要字段）
+   */
+  async getFriendshipForValidation(friendshipId) {
+    try {
+      if (!friendshipId) {
+        throw new Error('好友关系ID是必需的');
+      }
+
+      const result = await withRetry(async () => {
+        return await databases.listDocuments(
+          APPWRITE_CONFIG.databaseId,
+          COLLECTION_ID,
+          [
+            Query.equal('$id', friendshipId),
+            Query.limit(1),
+            Query.select([
+              "$id",
+              "fromUserId",
+              "toUserId", 
+              "status"
+            ])
+          ]
+        );
+      });
+
+      return result.documents.length > 0 ? result.documents[0] : null;
+    } catch (error) {
+      logError(error, { context: 'friendshipService.getFriendshipForValidation', friendshipId });
+      throw handleApiError(error, '获取好友关系验证信息失败');
     }
   },
 
