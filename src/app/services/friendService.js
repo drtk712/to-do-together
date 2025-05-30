@@ -42,7 +42,8 @@ export const friendService = {
       await notificationService.createFriendRequestNotification(
         currentUserId,
         friendUser.userId,
-        currentUser.name || currentUser.email
+        currentUser.name || currentUser.email,
+        friendship.$id
       );
 
       return {
@@ -142,12 +143,56 @@ export const friendService = {
     }
   },
 
+  /**
+   * 发送好友请求
+   */
+  async sendFriendRequest(fromUserId, toUserId) {
+    try {
+      if (!fromUserId || !toUserId) {
+        throw new Error('发送者和接收者ID都是必需的');
+      }
 
+      if (fromUserId === toUserId) {
+        throw new Error('不能向自己发送好友请求');
+      }
+
+      // 1. 获取发送者用户信息
+      const fromUser = await userService.getUserById(fromUserId);
+      if (!fromUser) {
+        throw new Error('发送者用户信息不存在');
+      }
+
+      // 2. 发送好友请求
+      const friendshipResult = await friendshipService.sendFriendRequest(fromUserId, toUserId);
+
+      // 3. 创建好友请求通知
+      try {
+        await notificationService.createFriendRequestNotification(
+          fromUserId,
+          toUserId,
+          fromUser.name || fromUser.email,
+          friendshipResult.$id
+        );
+      } catch (notificationError) {
+        // 通知创建失败不影响主流程，但记录错误
+        logError(notificationError, { 
+          context: 'friendService.sendFriendRequest.createNotification', 
+          fromUserId, 
+          toUserId 
+        });
+      }
+
+      return friendshipResult;
+    } catch (error) {
+      logError(error, { context: 'friendService.sendFriendRequest', fromUserId, toUserId });
+      throw handleApiError(error, '发送好友请求失败');
+    }
+  },
 
   /**
-   * 发送好友请求（通过用户对象）
+   * 发送好友请求（通过用户对象）- 保持向后兼容
    */
-  async sendFriendRequest(currentUserId, targetUser) {
+  async sendFriendRequestToUser(currentUserId, targetUser) {
     try {
       if (!currentUserId || !targetUser) {
         throw new Error('当前用户ID和目标用户都是必需的');
@@ -157,24 +202,11 @@ export const friendService = {
         throw new Error('不能添加自己为好友');
       }
 
-      // 1. 获取当前用户信息（用于通知）
-      const currentUser = await userService.getUserById(currentUserId);
-      if (!currentUser) {
-        throw new Error('当前用户信息不存在');
-      }
-
-      // 2. 发送好友请求
-      const friendship = await friendshipService.sendFriendRequest(currentUserId, targetUser.userId);
-
-      // 3. 创建通知
-      await notificationService.createFriendRequestNotification(
-        currentUserId,
-        targetUser.userId,
-        currentUser.name || currentUser.email
-      );
+      // 调用新的发送好友请求方法
+      const friendshipResult = await this.sendFriendRequest(currentUserId, targetUser.userId);
 
       return {
-        friendship,
+        friendship: friendshipResult,
         friendUser: {
           userId: targetUser.userId,
           name: targetUser.name,
@@ -183,7 +215,7 @@ export const friendService = {
         }
       };
     } catch (error) {
-      logError(error, { context: 'friendService.sendFriendRequest', currentUserId, targetUser });
+      logError(error, { context: 'friendService.sendFriendRequestToUser', currentUserId, targetUser });
       throw handleApiError(error, '发送好友请求失败');
     }
   },
@@ -457,6 +489,50 @@ export const friendService = {
     } catch (error) {
       logError(error, { context: 'friendService.cancelFriendRequest', requestId, userId });
       throw handleApiError(error, '取消好友请求失败');
+    }
+  },
+
+  /**
+   * 处理好友请求（接受）
+   */
+  async handleFriendRequestAccept(notificationId, friendshipId, userId) {
+    try {
+      if (!notificationId || !friendshipId || !userId) {
+        throw new Error('通知ID、好友关系ID和用户ID都是必需的');
+      }
+
+      // 1. 接受好友请求
+      const updatedFriendship = await this.acceptFriendRequest(friendshipId, userId);
+
+      // 2. 标记通知为已读
+      await notificationService.markAsRead(notificationId, userId);
+
+      return updatedFriendship;
+    } catch (error) {
+      logError(error, { context: 'friendService.handleFriendRequestAccept', notificationId, friendshipId, userId });
+      throw handleApiError(error, '接受好友请求失败');
+    }
+  },
+
+  /**
+   * 处理好友请求（拒绝）
+   */
+  async handleFriendRequestReject(notificationId, friendshipId, userId) {
+    try {
+      if (!notificationId || !friendshipId || !userId) {
+        throw new Error('通知ID、好友关系ID和用户ID都是必需的');
+      }
+
+      // 1. 拒绝好友请求
+      await friendshipService.rejectFriendRequest(friendshipId, userId);
+
+      // 2. 标记通知为已读
+      await notificationService.markAsRead(notificationId, userId);
+
+      return true;
+    } catch (error) {
+      logError(error, { context: 'friendService.handleFriendRequestReject', notificationId, friendshipId, userId });
+      throw handleApiError(error, '拒绝好友请求失败');
     }
   }
 };

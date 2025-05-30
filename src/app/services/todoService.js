@@ -8,6 +8,13 @@ import {
   withRetry,
 } from "../utils/errorHandler";
 
+// 待办状态常量
+export const TODO_STATUS = {
+  PENDING: 'pending',
+  COMPLETED: 'completed',
+  SHARED: 'shared'
+};
+
 const COLLECTION_ID = APPWRITE_CONFIG.collections.todos;
 
 // 同步队列相关常量
@@ -253,10 +260,10 @@ export const todoService = {
   // 创建待办事项（仅处理API调用和离线队列）
   async createTodo({
     title,
-    description,
-    dueDate,
-    priority,
-    status = "pending",
+    description = "",
+    priority = "medium",
+    status = TODO_STATUS.PENDING,
+    dueDate = null,
     userId,
   }) {
     if (!userId) {
@@ -483,7 +490,8 @@ export const todoService = {
             Query.limit(1),
             Query.select([
               "$id",
-              "status"
+              "status",
+              "originalStatus" // 添加原始状态字段查询
             ])
           ]
         );
@@ -495,11 +503,30 @@ export const todoService = {
 
       const todo = result.documents[0];
 
-      // 切换状态
-      const newStatus = todo.status === 'completed' ? 'pending' : 'completed';
+      // 切换状态逻辑：
+      // 如果当前是completed，返回到原始状态（shared或pending）
+      // 如果当前不是completed，切换到completed并记录原始状态
+      let newStatus;
+      let updateData;
+      
+      if (todo.status === TODO_STATUS.COMPLETED) {
+        // 从completed状态返回，使用原始状态或默认为pending
+        newStatus = todo.originalStatus || TODO_STATUS.PENDING;
+        updateData = { 
+          status: newStatus,
+          originalStatus: null // 清除原始状态记录
+        };
+      } else {
+        // 切换到completed，记录当前状态作为原始状态
+        newStatus = TODO_STATUS.COMPLETED;
+        updateData = { 
+          status: newStatus,
+          originalStatus: todo.status // 记录原始状态
+        };
+      }
       
       // 更新状态
-      return await this.updateTodoStatus(todoId, newStatus, userId);
+      return await this.updateTodo(todoId, updateData, userId);
     } catch (error) {
       const appError = handleApiError(error);
       logError(appError, { context: "toggleTodoComplete", todoId, userId });
@@ -569,5 +596,301 @@ export const todoService = {
   // 获取待同步操作数量
   getPendingSyncCount: (userId) => {
     return syncQueueManager.getPendingCount(userId);
+  },
+
+  // 获取好友分享的待办事项
+  async getSharedTodos(userId, filters = {}) {
+    if (!userId) {
+      throw handleApiError(new Error("userId is required"));
+    }
+
+    try {
+      // 首先获取分享记录
+      const { sharedTodoService } = await import('./sharedTodoService.js');
+      const shareRecords = await sharedTodoService.getSharedTodosForUser(userId, filters);
+      
+      if (shareRecords.documents.length === 0) {
+        return { documents: [] };
+      }
+
+      // 获取所有相关的todoId
+      const todoIds = shareRecords.documents.map(record => record.todoId);
+      
+      // 查询实际的待办事项数据
+      const queries = [
+        Query.equal("$id", todoIds),
+        Query.select([
+          "$id",
+          "userId",
+          "title", 
+          "description",
+          "dueDate",
+          "priority",
+          "status",
+          "$createdAt",
+          "$updatedAt"
+        ]),
+      ];
+
+      // 添加过滤条件
+      if (filters.status) {
+        queries.push(Query.equal("status", filters.status));
+      }
+
+      if (filters.priority && filters.priority.length > 0) {
+        queries.push(Query.equal("priority", filters.priority));
+      }
+
+      // 添加排序
+      queries.push(Query.orderDesc("$createdAt"));
+
+      const todosResponse = await withRetry(async () => {
+        return await databases.listDocuments(
+          APPWRITE_CONFIG.databaseId,
+          COLLECTION_ID,
+          queries
+        );
+      }, APP_CONFIG.retry);
+
+      // 合并分享信息和待办事项数据
+      const todosWithShareInfo = todosResponse.documents.map(todo => {
+        const shareRecord = shareRecords.documents.find(record => record.todoId === todo.$id);
+        return {
+          ...todo,
+          shareInfo: shareRecord ? {
+            shareId: shareRecord.$id,
+            fromUserId: shareRecord.fromUserId,
+            shareStatus: shareRecord.status,
+            sharedAt: shareRecord.$createdAt
+          } : null
+        };
+      });
+
+      return { documents: todosWithShareInfo };
+      
+    } catch (error) {
+      const appError = handleApiError(error);
+      logError(appError, { context: "getSharedTodos", userId, filters });
+      throw appError;
+    }
+  },
+
+  // 获取待办事项统计信息
+  async getTodoStats(userId) {
+    if (!userId) {
+      throw handleApiError(new Error("userId is required"));
+    }
+
+    try {
+      // 获取所有待办事项
+      const todosResponse = await withRetry(async () => {
+        return await databases.listDocuments(
+          APPWRITE_CONFIG.databaseId,
+          COLLECTION_ID,
+          [
+            Query.equal("userId", userId),
+            Query.select([
+              "$id",
+              "status",
+              "priority",
+              "dueDate",
+              "$createdAt"
+            ])
+          ]
+        );
+      }, APP_CONFIG.retry);
+
+      const todos = todosResponse.documents;
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      const thisWeek = new Date(today);
+      thisWeek.setDate(today.getDate() + 7);
+
+      // 计算各种统计信息
+      const stats = {
+        total: todos.length,
+        completed: todos.filter(todo => todo.status === TODO_STATUS.COMPLETED).length,
+        pending: todos.filter(todo => todo.status === TODO_STATUS.PENDING).length,
+        shared: todos.filter(todo => todo.status === TODO_STATUS.SHARED).length,
+        
+        // 优先级统计
+        priority: {
+          high: todos.filter(todo => todo.priority === 'high').length,
+          medium: todos.filter(todo => todo.priority === 'medium').length,
+          low: todos.filter(todo => todo.priority === 'low').length
+        },
+
+        // 时间相关统计
+        overdue: todos.filter(todo => {
+          if (!todo.dueDate || todo.status === TODO_STATUS.COMPLETED) return false;
+          return new Date(todo.dueDate) < today;
+        }).length,
+
+        dueToday: todos.filter(todo => {
+          if (!todo.dueDate || todo.status === TODO_STATUS.COMPLETED) return false;
+          const dueDate = new Date(todo.dueDate);
+          return dueDate >= today && dueDate < tomorrow;
+        }).length,
+
+        dueThisWeek: todos.filter(todo => {
+          if (!todo.dueDate || todo.status === TODO_STATUS.COMPLETED) return false;
+          const dueDate = new Date(todo.dueDate);
+          return dueDate >= today && dueDate < thisWeek;
+        }).length,
+
+        // 创建时间统计
+        createdToday: todos.filter(todo => {
+          const createdDate = new Date(todo.$createdAt);
+          return createdDate >= today && createdDate < tomorrow;
+        }).length,
+
+        createdThisWeek: todos.filter(todo => {
+          const createdDate = new Date(todo.$createdAt);
+          const weekAgo = new Date(today);
+          weekAgo.setDate(today.getDate() - 7);
+          return createdDate >= weekAgo;
+        }).length,
+
+        // 完成率
+        completionRate: todos.length > 0 ? 
+          Math.round((todos.filter(todo => todo.status === TODO_STATUS.COMPLETED).length / todos.length) * 100) : 0
+      };
+
+      return stats;
+    } catch (error) {
+      const appError = handleApiError(error);
+      logError(appError, { context: "getTodoStats", userId });
+      throw appError;
+    }
+  },
+
+  // 根据ID获取单个待办事项
+  async getTodoById(todoId, userId) {
+    if (!todoId || !userId) {
+      throw handleApiError(new Error("todoId and userId are required"));
+    }
+
+    try {
+      const result = await withRetry(async () => {
+        return await databases.listDocuments(
+          APPWRITE_CONFIG.databaseId,
+          COLLECTION_ID,
+          [
+            Query.equal("$id", todoId),
+            Query.equal("userId", userId),
+            Query.limit(1)
+          ]
+        );
+      }, APP_CONFIG.retry);
+
+      if (result.documents.length === 0) {
+        return null;
+      }
+
+      return result.documents[0];
+    } catch (error) {
+      const appError = handleApiError(error);
+      logError(appError, { context: "getTodoById", todoId, userId });
+      throw appError;
+    }
+  },
+
+  // 分享待办事项
+  async shareTodo(todoId, friendIds, userId) {
+    if (!todoId || !friendIds || !Array.isArray(friendIds) || !userId) {
+      throw handleApiError(new Error("todoId, friendIds array, and userId are required"));
+    }
+
+    try {
+      const { sharedTodoService } = await import('./sharedTodoService.js');
+      const result = await sharedTodoService.shareTodoWithFriends(todoId, friendIds, userId);
+      return result;
+    } catch (error) {
+      const appError = handleApiError(error);
+      logError(appError, { context: "shareTodo", todoId, friendIds, userId });
+      throw appError;
+    }
+  },
+
+  // 取消分享待办事项
+  async unshareTodo(todoId, friendIds, userId) {
+    if (!todoId || !friendIds || !Array.isArray(friendIds) || !userId) {
+      throw handleApiError(new Error("todoId, friendIds array, and userId are required"));
+    }
+
+    try {
+      const { sharedTodoService } = await import('./sharedTodoService.js');
+      
+      // 为每个好友删除分享记录
+      for (const friendId of friendIds) {
+        const shares = await sharedTodoService.getSharesForTodo(todoId, userId);
+        const shareToDelete = shares.documents.find(share => share.userId === friendId);
+        if (shareToDelete) {
+          await sharedTodoService.deleteShare(shareToDelete.$id, userId);
+        }
+      }
+
+      return true;
+    } catch (error) {
+      const appError = handleApiError(error);
+      logError(appError, { context: "unshareTodo", todoId, friendIds, userId });
+      throw appError;
+    }
+  },
+
+  // 搜索待办事项
+  async searchTodos(userId, query, filters = {}) {
+    if (!userId || !query) {
+      throw handleApiError(new Error("userId and query are required"));
+    }
+
+    try {
+      const queries = [
+        Query.equal("userId", userId),
+        Query.or([
+          Query.search("title", query),
+          Query.search("description", query)
+        ]),
+        Query.select([
+          "$id",
+          "userId",
+          "title",
+          "description",
+          "dueDate",
+          "priority",
+          "status",
+          "$createdAt",
+          "$updatedAt"
+        ]),
+      ];
+
+      // 添加过滤条件
+      if (filters.status) {
+        queries.push(Query.equal("status", filters.status));
+      }
+
+      if (filters.priority && filters.priority.length > 0) {
+        queries.push(Query.equal("priority", filters.priority));
+      }
+
+      // 添加排序
+      queries.push(Query.orderDesc("$createdAt"));
+
+      const response = await withRetry(async () => {
+        return await databases.listDocuments(
+          APPWRITE_CONFIG.databaseId,
+          COLLECTION_ID,
+          queries
+        );
+      }, APP_CONFIG.retry);
+
+      return response;
+    } catch (error) {
+      const appError = handleApiError(error);
+      logError(appError, { context: "searchTodos", userId, query, filters });
+      throw appError;
+    }
   }
 };

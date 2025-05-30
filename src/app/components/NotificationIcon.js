@@ -1,8 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '../hooks/useAuth';
+import { useNotificationCount } from '../hooks/useNotificationCount';
 import NotificationBubble from './NotificationBubble';
-import { useNotifications } from '../hooks/useNotifications';
+import { notificationService, NOTIFICATION_STATUS } from '../services/notificationService';
 
 /**
  * 消息通知图标组件
@@ -10,143 +12,161 @@ import { useNotifications } from '../hooks/useNotifications';
  */
 const NotificationIcon = () => {
   const [showBubble, setShowBubble] = useState(false);
+  const [recentNotifications, setRecentNotifications] = useState([]);
   const router = useRouter();
-  
-  const {
-    unreadCount,
-    markAsRead,
-    getRecentUnreadNotifications
-  } = useNotifications();
+  const { user } = useAuth();
+  const { unreadCount, loading, refresh, decrementCount } = useNotificationCount();
 
-  // 获取最近的未读消息
-  const recentUnreadNotifications = getRecentUnreadNotifications(5);
+  // 加载最近的未读通知
+  const loadRecentNotifications = useCallback(async () => {
+    if (!user?.$id) {
+      setRecentNotifications([]);
+      return;
+    }
+    
+    try {
+      const notifications = await notificationService.getNotifications(
+        user.$id, 
+        NOTIFICATION_STATUS.UNREAD, 
+        5
+      );
+      setRecentNotifications(notifications);
+    } catch (error) {
+      console.error('Failed to load recent notifications:', error);
+      setRecentNotifications([]);
+    }
+  }, [user?.$id]);
 
-  // 处理图标点击 - 使用 useCallback 优化性能
-  const handleIconClick = useCallback(() => {
-    console.log('Icon clicked, current showBubble:', showBubble);
-    setShowBubble(prev => !prev);
-  }, [showBubble]);
+  // 初始加载
+  useEffect(() => {
+    loadRecentNotifications();
+  }, [loadRecentNotifications]);
 
-  // 关闭气泡 - 使用 useCallback 优化性能
+  // 处理通知图标点击
+  const handleIconClick = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (unreadCount > 0) {
+      setShowBubble(prev => !prev);
+      if (!showBubble) {
+        loadRecentNotifications();
+      }
+    } else {
+      router.push('/notifications');
+    }
+  }, [unreadCount, showBubble, router, loadRecentNotifications]);
+
+  // 关闭气泡
   const handleCloseBubble = useCallback(() => {
-    console.log('Closing bubble');
     setShowBubble(false);
   }, []);
 
-  // 查看所有消息 - 使用 useCallback 优化性能
+  // 标记为已读
+  const handleMarkAsRead = useCallback(async (notificationId) => {
+    try {
+      await notificationService.markAsRead(notificationId, user.$id);
+      
+      // 更新本地状态
+      setRecentNotifications(prev => 
+        prev.filter(n => n.$id !== notificationId)
+      );
+      
+      // 减少未读数量
+      decrementCount(1);
+    } catch (error) {
+      console.error('Failed to mark as read:', error);
+    }
+  }, [user?.$id, decrementCount]);
+
+  // 查看所有通知
   const handleViewAll = useCallback(() => {
+    setShowBubble(false);
     router.push('/notifications');
   }, [router]);
 
+  // 键盘事件处理
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleIconClick(e);
+    } else if (e.key === 'Escape' && showBubble) {
+      handleCloseBubble();
+    }
+  }, [handleIconClick, showBubble, handleCloseBubble]);
+
   return (
-    <div className="relative">
-      {/* 通知图标 */}
-      <motion.button
-        onClick={handleIconClick}
-        className="relative p-3 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors touch-manipulation"
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        style={{ 
-          minWidth: '48px', 
-          minHeight: '48px',
-          WebkitTapHighlightColor: 'transparent'
-        }}
-        aria-label={`消息通知${unreadCount > 0 ? `, ${unreadCount}条未读` : ''}`}
-      >
-        {/* 图标背景圆形 */}
-        <motion.div
-          className="absolute inset-0 rounded-full bg-gradient-to-br from-blue-50 to-purple-50"
-          initial={{ scale: 0 }}
-          animate={{ scale: showBubble ? 1 : 0 }}
-          transition={{ duration: 0.2 }}
-        />
-        
-        {/* 通知铃铛图标 */}
-        <motion.svg 
-          className="relative w-6 h-6 text-gray-600" 
-          fill="none" 
-          stroke="currentColor" 
-          viewBox="0 0 24 24"
-          animate={{ 
-            rotate: showBubble ? [0, -10, 10, -5, 0] : 0,
-            scale: unreadCount > 0 ? [1, 1.1, 1] : 1
-          }}
-          transition={{ 
-            rotate: { duration: 0.5 },
-            scale: { 
-              duration: 0.3, 
-              repeat: unreadCount > 0 ? Infinity : 0, 
-              repeatDelay: 3 
-            }
-          }}
+    <>
+      <div className="relative">
+        <motion.button
+          onClick={handleIconClick}
+          onKeyDown={handleKeyDown}
+          className="relative p-2 text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white transition-colors duration-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          aria-label={`消息通知${unreadCount > 0 ? `，${unreadCount}条未读` : ''}`}
+          role="button"
+          tabIndex={0}
         >
-          <path 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            strokeWidth={2} 
-            d="M15 17h5l-5 5V12H9l5-5v10z" 
-          />
-        </motion.svg>
-        
-        {/* 红点提示 */}
-        <AnimatePresence>
-          {unreadCount > 0 && (
+          {/* 通知图标 */}
+          <svg
+            className="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 17h5l-5 5V12a3 3 0 00-6 0v5l-5 5h5m0 0v1a3 3 0 006 0v-1m-6 0h6"
+            />
+          </svg>
+
+          {/* 未读数量徽章 */}
+          <AnimatePresence>
+            {unreadCount > 0 && (
+              <motion.span
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0, opacity: 0 }}
+                transition={{ 
+                  type: "spring", 
+                  stiffness: 500, 
+                  damping: 30 
+                }}
+                className="absolute -top-1 -right-1 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full shadow-lg"
+                aria-hidden="true"
+              >
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </motion.span>
+            )}
+          </AnimatePresence>
+
+          {/* 加载指示器 */}
+          {loading && (
             <motion.div
-              key={unreadCount}
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ 
-                scale: 1, 
-                opacity: 1,
-                y: [0, -2, 0],
-              }}
-              exit={{ scale: 0, opacity: 0 }}
-              transition={{
-                scale: { type: "spring", stiffness: 500, damping: 25 },
-                y: { duration: 0.6, repeat: Infinity, repeatDelay: 2 }
-              }}
-              className="absolute -top-1 -right-1 min-w-[20px] h-[20px] bg-gradient-to-r from-red-500 to-red-600 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-lg ring-2 ring-white"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute -top-1 -right-1 w-3 h-3"
             >
-              {unreadCount > 99 ? '99+' : unreadCount}
+              <div className="w-full h-full border-2 border-gray-300 border-t-indigo-500 rounded-full animate-spin"></div>
             </motion.div>
           )}
-        </AnimatePresence>
-
-        {/* 脉冲动画环 */}
-        <AnimatePresence>
-          {unreadCount > 0 && (
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ 
-                scale: [0.8, 1.5, 0.8], 
-                opacity: [0.3, 0, 0.3] 
-              }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              transition={{ 
-                duration: 2, 
-                repeat: Infinity,
-                ease: "easeInOut"
-              }}
-              className="absolute -top-1 -right-1 w-[20px] h-[20px] bg-red-400 rounded-full"
-            />
-          )}
-        </AnimatePresence>
-      </motion.button>
+        </motion.button>
+      </div>
 
       {/* 通知气泡 */}
-      {console.log('NotificationIcon showBubble state:', showBubble)}
-      <AnimatePresence mode="wait">
-        {showBubble && (
-          <NotificationBubble
-            key="notification-bubble"
-            isVisible={showBubble}
-            notifications={recentUnreadNotifications}
-            onClose={handleCloseBubble}
-            onMarkAsRead={markAsRead}
-            onViewAll={handleViewAll}
-          />
-        )}
-      </AnimatePresence>
-    </div>
+      <NotificationBubble
+        isVisible={showBubble}
+        notifications={recentNotifications}
+        onClose={handleCloseBubble}
+        onMarkAsRead={handleMarkAsRead}
+        onViewAll={handleViewAll}
+      />
+    </>
   );
 };
 

@@ -105,6 +105,12 @@ const TodoList = forwardRef(({ onCountChange, ...props }, ref) => {
     setSelectedTodo(null);
   }, []);
 
+  // 处理分享成功
+  const handleShareSuccess = useCallback((friendCount) => {
+    // 可以在这里添加一些成功后的逻辑，如刷新数据或显示通知
+    console.log(`Todo shared with ${friendCount} friends successfully`);
+  }, []);
+
   // 格式化日期
   const formatDate = useCallback((dateString) => {
     if (!dateString) return '';
@@ -210,6 +216,7 @@ const TodoList = forwardRef(({ onCountChange, ...props }, ref) => {
         onClose={closeDetailModal}
         onStatusChange={updateTodoStatus}
         onDelete={deleteTodo}
+        onShareSuccess={handleShareSuccess}
         formatDate={formatDate}
       />
     </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
+import { NOTIFICATION_TYPE } from '../services/notificationService';
 
 /**
  * 消息通知气泡组件
@@ -49,7 +50,8 @@ const NotificationBubble = ({
   // 格式化时间 - 使用 useCallback 优化性能
   const formatTime = useCallback((timestamp) => {
     const now = Date.now();
-    const diff = now - timestamp;
+    const notificationTime = new Date(timestamp).getTime();
+    const diff = now - notificationTime;
     
     if (diff < 60000) return '刚刚';
     if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
@@ -58,15 +60,30 @@ const NotificationBubble = ({
     return '1周前';
   }, []);
 
-  // 获取优先级颜色 - 使用 useCallback 优化性能
-  const getPriorityColor = useCallback((priority) => {
+  // 获取通知类型颜色 - 使用 useCallback 优化性能
+  const getTypeColor = useCallback((type) => {
     const colorMap = {
-      high: 'border-l-red-400 bg-red-50',
-      medium: 'border-l-yellow-400 bg-yellow-50',
-      low: 'border-l-green-400 bg-green-50',
-      default: 'border-l-gray-400 bg-gray-50'
+      [NOTIFICATION_TYPE.FRIEND_REQUEST]: 'border-l-blue-400 bg-blue-50',
+      [NOTIFICATION_TYPE.FRIEND_ACCEPTED]: 'border-l-green-400 bg-green-50',
+      [NOTIFICATION_TYPE.FRIEND_REJECTED]: 'border-l-red-400 bg-red-50',
+      [NOTIFICATION_TYPE.TODO_SHARED]: 'border-l-purple-400 bg-purple-50',
+      [NOTIFICATION_TYPE.TODO_REMINDER]: 'border-l-yellow-400 bg-yellow-50',
+      [NOTIFICATION_TYPE.SYSTEM]: 'border-l-gray-400 bg-gray-50'
     };
-    return colorMap[priority] || colorMap.default;
+    return colorMap[type] || 'border-l-gray-400 bg-gray-50';
+  }, []);
+
+  // 获取通知图标
+  const getNotificationIcon = useCallback((type) => {
+    const iconMap = {
+      [NOTIFICATION_TYPE.FRIEND_REQUEST]: '👤',
+      [NOTIFICATION_TYPE.FRIEND_ACCEPTED]: '✅',
+      [NOTIFICATION_TYPE.FRIEND_REJECTED]: '❌',
+      [NOTIFICATION_TYPE.TODO_SHARED]: '📋',
+      [NOTIFICATION_TYPE.TODO_REMINDER]: '⏰',
+      [NOTIFICATION_TYPE.SYSTEM]: '🔔'
+    };
+    return iconMap[type] || '📧';
   }, []);
 
   // 处理通知点击 - 使用 useCallback 优化性能
@@ -74,22 +91,21 @@ const NotificationBubble = ({
     console.log('Notification clicked:', notification.title);
     
     // 标记为已读并关闭气泡
-    onMarkAsRead?.(notification.id);
+    onMarkAsRead?.(notification.$id);
     onClose?.();
     
     // 根据通知类型导航到相应页面
     const routeMap = {
-      todo: '/dashboard',
-      friend: '/dashboard?tab=friends',
-      system: '/notifications',
-      login: '/notifications',
-      summary: '/notifications'
+      [NOTIFICATION_TYPE.TODO_SHARED]: '/dashboard',
+      [NOTIFICATION_TYPE.FRIEND_REQUEST]: '/dashboard?tab=friends',
+      [NOTIFICATION_TYPE.FRIEND_ACCEPTED]: '/dashboard?tab=friends',
+      [NOTIFICATION_TYPE.FRIEND_REJECTED]: '/dashboard?tab=friends',
+      [NOTIFICATION_TYPE.TODO_REMINDER]: '/dashboard',
+      [NOTIFICATION_TYPE.SYSTEM]: '/notifications'
     };
     
-    const route = routeMap[notification.type];
-    if (route) {
-      router.push(route);
-    }
+    const route = routeMap[notification.type] || '/notifications';
+    router.push(route);
   }, [onMarkAsRead, onClose, router]);
 
   // 处理背景点击
@@ -238,8 +254,8 @@ const NotificationBubble = ({
             <div className="space-y-1 p-2">
               {notifications.map((notification, index) => (
                 <div
-                  key={notification.id}
-                  className={`border-l-4 ${getPriorityColor(notification.priority)} rounded-lg overflow-hidden`}
+                  key={notification.$id}
+                  className={`border-l-4 ${getTypeColor(notification.type)} rounded-lg overflow-hidden`}
                 >
                   <div
                     className="p-4 hover:bg-gray-50 active:bg-gray-100 cursor-pointer transition-colors"
@@ -250,36 +266,24 @@ const NotificationBubble = ({
                     }}
                   >
                     <div className="flex items-start space-x-3">
-                      {/* 图标 */}
+                      {/* 通知图标 */}
                       <div className="flex-shrink-0 w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm border border-gray-200">
-                        <span className="text-lg" role="img" aria-label={notification.type}>
-                          {notification.icon}
-                        </span>
+                        <span className="text-lg">{getNotificationIcon(notification.type)}</span>
                       </div>
                       
-                      {/* 内容 */}
+                      {/* 通知内容 */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between mb-1">
                           <h4 className="text-sm font-semibold text-gray-900 truncate pr-2">
                             {notification.title}
                           </h4>
-                          <div className="flex items-center space-x-1 flex-shrink-0">
-                            <span className="text-xs text-gray-500 whitespace-nowrap">
-                              {formatTime(notification.timestamp)}
-                            </span>
-                            <div className="w-2 h-2 bg-blue-500 rounded-full" aria-hidden="true"></div>
-                          </div>
+                          <span className="text-xs text-gray-500 flex-shrink-0">
+                            {formatTime(notification.$createdAt)}
+                          </span>
                         </div>
-                        <p className="text-sm text-gray-600 line-clamp-2 leading-relaxed">
+                        <p className="text-sm text-gray-600 leading-relaxed line-clamp-2">
                           {notification.message}
                         </p>
-                        
-                        {/* 优先级标签 */}
-                        {notification.priority === 'high' && (
-                          <span className="inline-block mt-2 px-2 py-1 text-xs font-bold text-red-600 bg-red-100 rounded-full">
-                            🔥 重要
-                          </span>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -289,19 +293,14 @@ const NotificationBubble = ({
           )}
         </div>
 
-        {/* 底部操作区 */}
+        {/* 气泡底部 */}
         {notifications.length > 0 && (
-          <div className="p-4 border-t border-gray-100 bg-gray-50">
+          <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
             <button
               onClick={handleViewAllClick}
-              className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold shadow-lg active:shadow-md transition-all"
+              className="w-full px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 rounded-lg transition-colors"
             >
-              <div className="flex items-center justify-center space-x-2">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-                <span>查看所有消息</span>
-              </div>
+              查看全部消息
             </button>
           </div>
         )}
@@ -309,8 +308,11 @@ const NotificationBubble = ({
     </motion.div>
   );
 
-  // 使用 Portal 将气泡渲染到 document.body，避免事件冒泡
-  return typeof window !== 'undefined' ? createPortal(bubbleContent, document.body) : null;
+  // 条件渲染
+  if (!isVisible) return null;
+
+  // 使用 Portal 渲染到 body
+  return createPortal(bubbleContent, document.body);
 };
 
 export default NotificationBubble;

@@ -178,10 +178,10 @@ export const cachedFriendService = {
    */
   async sendFriendRequest(currentUserId, targetUser) {
     try {
-      const result = await friendService.sendFriendRequest(currentUserId, targetUser);
+      const result = await friendService.sendFriendRequestToUser(currentUserId, targetUser);
       
-      // 失效相关缓存
-      this.invalidateFriendshipCache(currentUserId, targetUser.userId);
+      // 清理缓存
+      await this.clearUserRelatedCaches(currentUserId);
       
       return result;
     } catch (error) {

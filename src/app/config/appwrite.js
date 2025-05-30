@@ -13,6 +13,7 @@ export const APPWRITE_CONFIG = {
     users: process.env.NEXT_PUBLIC_APPWRITE_DATABASE_COLLECTION_USERS_ID || '',
     friendships: process.env.NEXT_PUBLIC_APPWRITE_DATABASE_COLLECTION_FRIENDSHIPS_ID || '',
     notifications: process.env.NEXT_PUBLIC_APPWRITE_DATABASE_COLLECTION_NOTIFICATIONS_ID || '',
+    shared_todos: process.env.NEXT_PUBLIC_APPWRITE_DATABASE_COLLECTION_SHARED_TODOS_ID || '',
   },
   storageId: process.env.NEXT_PUBLIC_APPWRITE_STORAGE_ID || '',
 };

@@ -74,7 +74,7 @@ export const notificationService = {
   /**
    * 创建好友请求通知
    */
-  async createFriendRequestNotification(fromUserId, toUserId, fromUserName) {
+  async createFriendRequestNotification(fromUserId, toUserId, fromUserName, friendshipId) {
     try {
       return await this.createNotification({
         toUserId,
@@ -84,7 +84,8 @@ export const notificationService = {
         message: `${fromUserName} 想要添加您为好友`,
         data: {
           fromUserId,
-          fromUserName
+          fromUserName,
+          friendshipId
         },
         actionUrl: '/dashboard/friends'
       });
@@ -114,6 +115,31 @@ export const notificationService = {
     } catch (error) {
       logError(error, { context: 'notificationService.createFriendAcceptedNotification', fromUserId, toUserId });
       throw handleApiError(error, '创建好友接受通知失败');
+    }
+  },
+
+  /**
+   * 创建待办分享通知
+   */
+  async createTodoSharedNotification(fromUserId, toUserId, fromUserName, todoTitle, todoId) {
+    try {
+      return await this.createNotification({
+        toUserId,
+        fromUserId,
+        type: NOTIFICATION_TYPE.TODO_SHARED,
+        title: '收到分享的待办',
+        message: `${fromUserName} 分享了待办"${todoTitle}"给您`,
+        data: {
+          fromUserId,
+          fromUserName,
+          todoId,
+          todoTitle
+        },
+        actionUrl: '/dashboard'
+      });
+    } catch (error) {
+      logError(error, { context: 'notificationService.createTodoSharedNotification', fromUserId, toUserId, todoId });
+      throw handleApiError(error, '创建待办分享通知失败');
     }
   },
 
@@ -216,6 +242,9 @@ export const notificationService = {
         throw new Error('通知不存在或无权访问');
       }
 
+      // 获取完整通知信息
+      const fullNotification = await this.getNotificationById(notificationId);
+      
       const result = await withRetry(async () => {
         return await databases.updateDocument(
           APPWRITE_CONFIG.databaseId,
@@ -227,6 +256,37 @@ export const notificationService = {
           }
         );
       });
+
+      // 如果是待办分享通知，当已读时更新shared_todos状态为pending
+      if (fullNotification && fullNotification.type === NOTIFICATION_TYPE.TODO_SHARED) {
+        try {
+          const { sharedTodoService } = await import('./sharedTodoService.js');
+          const todoId = fullNotification.data.todoId;
+          
+          if (todoId) {
+            // 查找对应的shared_todos记录
+            const shareRecords = await sharedTodoService.getSharedTodosForUser(userId, {
+              // 这里可以添加更多过滤条件来精确匹配
+            });
+            
+            const targetShare = shareRecords.documents.find(share => 
+              share.todoId === todoId && 
+              share.fromUserId === fullNotification.fromUserId
+            );
+            
+            if (targetShare && targetShare.status === 'unread') {
+              await sharedTodoService.updateShareStatus(targetShare.$id, 'pending', userId);
+            }
+          }
+        } catch (shareError) {
+          // 记录错误但不影响主流程
+          logError(shareError, { 
+            context: 'notificationService.markAsRead.updateShareStatus', 
+            notificationId, 
+            userId 
+          });
+        }
+      }
 
       return result;
     } catch (error) {

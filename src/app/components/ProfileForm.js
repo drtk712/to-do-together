@@ -1,17 +1,17 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { account, storage } from "../appwrite";
 import useAuthStore from "../store/authStore";
 import { APPWRITE_CONFIG, APP_CONFIG } from "../config/appwrite.js";
-import { useNotifications } from "../hooks/useNotifications";
+import { useNotificationCount } from "../hooks/useNotificationCount";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function ProfileForm({ user }) {
   const router = useRouter();
   const { setUser } = useAuthStore();
-  const { unreadCount } = useNotifications();
+  const { unreadCount } = useNotificationCount();
   const [isEditing, setIsEditing] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [formData, setFormData] = useState({
@@ -27,6 +27,16 @@ export default function ProfileForm({ user }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  // 处理消息通知按钮点击
+  const handleNotificationClick = () => {
+    console.log('Notification button clicked, navigating to /notifications');
+    try {
+      router.push('/notifications');
+    } catch (error) {
+      console.error('Router navigation error:', error);
+    }
+  };
 
   // 验证用户名
   const validateName = (name) => {
@@ -456,14 +466,18 @@ export default function ProfileForm({ user }) {
           
           {/* 消息通知入口 */}
           <button
-            onClick={() => router.push('/notifications')}
-            className="w-full flex items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group"
+            onClick={handleNotificationClick}
+            className="w-full flex items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group cursor-pointer relative z-10"
+            style={{ 
+              WebkitTapHighlightColor: 'transparent',
+              userSelect: 'none'
+            }}
           >
             <div className="flex items-center space-x-3">
               <div className="relative">
                 <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
                   <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v5H9v-5l-5-5h5V7a5 5 0 0110 0v10z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5V12a3 3 0 00-6 0v5l-5 5h5m0 0v1a3 3 0 006 0v-1m-6 0h6" />
                   </svg>
                 </div>
                 {unreadCount > 0 && (
